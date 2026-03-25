@@ -206,12 +206,12 @@ async function fetchMiHong(codes: string[]): Promise<GoldItem[]> {
 
 // 💰 FORMAT
 function formatPrice(n: number) {
-	return n.toLocaleString("vi-VN") + " VND";
+	return n.toLocaleString("vi-VN") + " VND/mace";
 }
 
 function formatChange(n: number) {
 	const sign = n > 0 ? "📈 +" : n < 0 ? "📉 " : "➖ ";
-	return sign + n.toLocaleString("vi-VN");
+	return sign + n.toLocaleString("vi-VN") + " VND";
 }
 
 // 🧾 MESSAGE
@@ -228,25 +228,30 @@ function buildMessage(list: GoldItem[]) {
 		return 0;
 	});
 
-	return sources.map(source => {
+	const header = "🔔 <b>GOLD PRICE UPDATE</b> ✨\n\n";
+
+	const body = sources.map(source => {
 		const items = groups[source];
-		const sourceName = source === "MH" ? "🏢 <b>Mi Hồng</b>" : "🏦 <b>GiaVang</b>";
+		const sourceName = source === "MH" ? "🏢 <b>MI HONG SYSTEM</b>" : "🏦 <b>GOLD PRICE EXCHANGE</b>";
 		const itemText = items.map(item => {
-			const trend = item.delta > 0 ? "�" : item.delta < 0 ? "📉" : "➖";
+			const trend = item.delta > 0 ? "📈" : item.delta < 0 ? "📉" : "➖";
 			const deltaText = item.delta !== 0
-				? `(Net: ${item.delta > 0 ? '� +' : '� '}${Math.abs(item.delta).toLocaleString("vi-VN")} VND)`
+				? ` (<i>${item.delta > 0 ? '↑' : '↓'}${Math.abs(item.delta).toLocaleString("vi-VN")} VND</i>)`
 				: "";
+			const sourceChange = formatChange(item.change_sell);
 
 			return `
 💰 <b>${item.name}</b> ${trend}
-📅 ${item.date} ${item.time}
-🟢 Buy:  ${formatPrice(item.buy)}
-🔴 Sell: ${formatPrice(item.sell)} ${deltaText}
-📊 ${formatChange(item.change_sell)}`;
+├ 🟢 Buy:  <code>${formatPrice(item.buy)}</code>
+├ 🔴 Sell: <code>${formatPrice(item.sell)}</code>${deltaText}
+├ 📊 Changes: <code>${sourceChange}</code>
+└ 🕒 <i>Updated: ${item.time} | ${item.date}</i>`;
 		}).join("\n");
 
 		return `${sourceName}\n${itemText}`;
-	}).join("\n\n----------------------\n\n");
+	}).join("\n\n──────────────\n\n");
+
+	return header + body;
 }
 
 // 📈 CHART

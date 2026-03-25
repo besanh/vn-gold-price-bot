@@ -78,7 +78,8 @@ npm run deploy
 - **Visual Analytics**: Sends professional **QuickChart** trend lines.
 - **Smart Alerts**: Only notifies when prices move by > 50,000 VND (Cron).
 - **Manual Reports**: Web triggers always provide a full summary.
-- **Units**: All data is standardized to **"per chỉ"** (1/10th lượng).
+- **Localization**: Full **English** notification support with premium visual tree formatting.
+- **Units**: All data is standardized to **"mace"** (chi) - 1/10th of a Vietnamese tael.
 
 ## ☁️ Cloudflare Free Tier Note
 

@@ -28,7 +28,7 @@ sequenceDiagram
     C->>API: Concurrent fetch from Mi Hồng & GiaVang
     API-->>C: Returns raw price data
     
-    Note over C: Normalize units to "per chỉ" (VND)
+    Note over C: Normalize units to "mace" (VND)
     
     C->>KV: Push new prices to "history_prices" (72h window)
     C->>KV: Get "last_prices" for change detection
@@ -57,10 +57,10 @@ To prevent cluttering the chat with noise, the bot only sends automated alerts w
 -   **Chart**: The chart **always** displays the full history for all 4 gold variants to maintain market context.
 
 ### 3. Data Normalization
-The bot ensures all data is comparable by standardizing to **"per chỉ"** (1/10th of a "lượng"). This includes dividing GiaVang's prices by 10 internally.
+The bot ensures all data is comparable by standardizing to **"mace"** (chi) - exactly 1/10th of a Vietnamese tael (lượng). This includes dividing GiaVang's prices by 10 internally.
 
 ### 4. Visual Optimization (Hourly Sampling)
 To keep charts clean and professional, the system uses a **sampling algorithm** that picks exactly one data point per hour from the 72-hour history. This prevents the chart from becoming overcrowded with hundreds of points.
 
 ---
-*Last Updated: March 24, 2026*
+*Last Updated: March 25, 2026*
