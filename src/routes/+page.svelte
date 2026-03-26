@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { invalidateAll } from '$app/navigation';
 	import PriceCard from '$lib/components/PriceCard.svelte';
 	import { uiState } from '$lib/uiState.svelte';
+	import { toaster } from '$lib/toast.svelte';
 	import type { PageData } from './$types';
 
 	let { data } = $props<{ data: PageData }>();
@@ -120,10 +122,14 @@
 		try {
 			const res = await fetch('/api/sync', { method: 'POST' });
 			if (res.ok) {
-				// Refresh the page data without full reload if possible
-				// For now, reload is acceptable for sync, but for LANG it shouldn't reload.
-				location.reload(); 
+				// Refresh the page data without full reload seamlessly
+				await invalidateAll(); 
+				toaster.add('success', 'Market data synced seamlessly!', 'Đồng bộ dữ liệu thành công!');
+			} else {
+				toaster.add('error', 'Failed to fetch market data.', 'Lỗi kết nối máy chủ.');
 			}
+		} catch (e) {
+			toaster.add('error', 'Network error occurred.', 'Lỗi kết nối mạng.');
 		} finally {
 			isSyncing = false;
 		}
@@ -150,16 +156,16 @@
 		</span>
 	</button>
 
-	<div class="toggle-container" onclick={() => autoSync = !autoSync}>
-		<label class="switch">
-			<input type="checkbox" aria-label="Toggle Auto Sync" bind:checked={autoSync} onclick={(e) => e.stopPropagation()} />
+	<label class="toggle-container">
+		<div class="switch">
+			<input type="checkbox" aria-label="Toggle Auto Sync" bind:checked={autoSync} />
 			<span class="slider"></span>
-		</label>
+		</div>
 		<span class="price-label" style="font-weight: 600;">
 			<span lang="en">Auto (5m)</span>
 			<span lang="vi">Tự động (5p)</span>
 		</span>
-	</div>
+	</label>
 </div>
 
 <div class="grid">

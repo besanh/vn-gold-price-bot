@@ -14,8 +14,9 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { uiState, initUIState, setLang, toggleTheme } from '$lib/uiState.svelte';
 	import '../app.css';
+	import { uiState, initUIState, setLang, toggleTheme } from '$lib/uiState.svelte';
+	import Toast from '$lib/components/Toast.svelte';
 
 	let { children } = $props();
 
@@ -67,4 +68,5 @@
 			<p style="margin-top: 0.5rem; opacity: 0.7;">© 2026 BesAnh</p>
 		</footer>
 	</div>
+	<Toast />
 </main>
