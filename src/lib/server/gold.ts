@@ -92,7 +92,22 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
             .filter(r => r.status === "fulfilled")
             .flatMap((r: any) => Array.isArray(r.value) ? r.value : [r.value]);
 
+        // 🗑️ ALWAYS CLEANUP OLD DATA (runs even if APIs fail)
+        const historyDays = parseInt(platform.env.HISTORY_DAYS || "3");
+        const now = Date.now();
+        const cutoff = now - (historyDays * 24 * 60 * 60 * 1000);
+        const historyRaw = await platform.env.GOLD_KV.get("history_prices");
+        let history: Record<string, { p: number, t: number }[]> = historyRaw ? JSON.parse(historyRaw) : {};
+
+        // Purge ALL keys older than retention window (in-memory only, written once at the end)
+        Object.keys(history).forEach(key => {
+            history[key] = history[key].filter(entry => entry.t > cutoff);
+            if (history[key].length === 0) delete history[key];
+        });
+
         if (!success.length) {
+            // Save cleanup even if no new data fetched
+            await platform.env.GOLD_KV.put("history_prices", JSON.stringify(history));
             console.log("❌ No data fetched from any source");
             return;
         }
@@ -113,19 +128,11 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
             }
         }
 
-        // 📈 UPDATE HISTORY
-        const historyDays = parseInt(platform.env.HISTORY_DAYS || "3");
-        const historyRaw = await platform.env.GOLD_KV.get("history_prices");
-        let history: Record<string, { p: number, t: number }[]> = historyRaw ? JSON.parse(historyRaw) : {};
-        const now = Date.now();
-        const windowMs = historyDays * 24 * 60 * 60 * 1000;
-        const cutoff = now - windowMs;
-
+        // 📈 APPEND NEW HISTORY ENTRIES (already cleaned above)
         success.forEach(item => {
             const key = `${item.source}_${item.type}`;
             if (!history[key]) history[key] = [];
             history[key].push({ p: item.sell, t: now });
-            history[key] = history[key].filter(entry => entry.t > cutoff);
         });
 
         await platform.env.GOLD_KV.put("history_prices", JSON.stringify(history));

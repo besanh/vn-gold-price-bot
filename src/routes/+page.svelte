@@ -118,18 +118,22 @@
 
 	let isSyncing = $state(false);
 	async function handleSync() {
+		if (isSyncing) return;
 		isSyncing = true;
+		// ⚡ Show instantly on click — before any network request
+		const loadingId = toaster.add('loading', 'Syncing prices…', 'Đang đồng bộ…', 0);
 		try {
 			const res = await fetch('/api/sync', { method: 'POST' });
+			toaster.remove(loadingId);
 			if (res.ok) {
-				// Refresh the page data without full reload seamlessly
-				await invalidateAll(); 
-				toaster.add('success', 'Market data synced seamlessly!', 'Đồng bộ dữ liệu thành công!');
+				await invalidateAll();
+				toaster.add('success', 'Market data synced!', 'Đồng bộ thành công!');
 			} else {
-				toaster.add('error', 'Failed to fetch market data.', 'Lỗi kết nối máy chủ.');
+				toaster.add('error', 'Server error. Try again.', 'Lỗi máy chủ. Thử lại.');
 			}
 		} catch (e) {
-			toaster.add('error', 'Network error occurred.', 'Lỗi kết nối mạng.');
+			toaster.remove(loadingId);
+			toaster.add('error', 'Network error.', 'Lỗi kết nối mạng.');
 		} finally {
 			isSyncing = false;
 		}

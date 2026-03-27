@@ -19,6 +19,8 @@
                     ✓
                 {:else if toast.type === 'error'}
                     ✕
+                {:else if toast.type === 'loading'}
+                    <span class="spinner"></span>
                 {:else}
                     ℹ
                 {/if}
@@ -95,6 +97,20 @@
     .close:hover {
         color: var(--text);
         background: rgba(255, 255, 255, 0.1);
+    }
+
+    .spinner {
+        display: inline-block;
+        width: 1rem;
+        height: 1rem;
+        border: 2px solid rgba(255,255,255,0.3);
+        border-top-color: var(--text, #f8fafc);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
     }
 
     @media (max-width: 640px) {

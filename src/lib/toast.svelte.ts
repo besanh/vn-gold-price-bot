@@ -1,6 +1,6 @@
 export interface ToastMessage {
     id: number;
-    type: 'success' | 'error' | 'info';
+    type: 'success' | 'error' | 'info' | 'loading';
     message: { en: string; vi: string };
 }
 
@@ -8,10 +8,11 @@ class ToastState {
     messages = $state<ToastMessage[]>([]);
     private nextId = 0;
 
-    add(type: ToastMessage['type'], en: string, vi: string) {
+    add(type: ToastMessage['type'], en: string, vi: string, durationMs = 4000): number {
         const id = this.nextId++;
         this.messages.push({ id, type, message: { en, vi } });
-        setTimeout(() => this.remove(id), 4000);
+        if (durationMs > 0) setTimeout(() => this.remove(id), durationMs);
+        return id;
     }
 
     remove(id: number) {
