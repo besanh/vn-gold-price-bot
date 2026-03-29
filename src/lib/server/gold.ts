@@ -3,6 +3,22 @@ import type { GoldItem } from '$lib/types';
 export async function getDashboardData(platform: App.Platform) {
     const giaVangTypes = ["SJL1L10", "SJ9999"];
     const miHongCodes = ["SJC"];
+
+    // ⚡ TRY CACHE FIRST
+    const cachedRaw = await platform.env.GOLD_KV.get("current_prices");
+    if (cachedRaw) {
+        try {
+            const cached = JSON.parse(cachedRaw);
+            // If data is less than 5 minutes old, return it
+            if (Date.now() - cached.timestamp < 300000) {
+                return cached.data;
+            }
+        } catch (e) {
+            console.warn("Invalid cache data", e);
+        }
+    }
+
+    // FALLBACK TO FRESH FETCH
     const tasks = [
         fetchMiHong(miHongCodes),
         ...giaVangTypes.map(t => fetchGiaVang(t))
@@ -30,7 +46,15 @@ export async function getDashboardData(platform: App.Platform) {
         if (history[key]) filteredHistory[key] = history[key];
     });
 
-    return { current, history: filteredHistory };
+    const responseData = { current, history: filteredHistory };
+
+    // Update cache in background (wait locally but don't block too long)
+    await platform.env.GOLD_KV.put("current_prices", JSON.stringify({
+        data: responseData,
+        timestamp: Date.now()
+    }));
+
+    return responseData;
 }
 
 async function fetchGiaVang(type: string): Promise<GoldItem> {
@@ -136,6 +160,12 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
         });
 
         await platform.env.GOLD_KV.put("history_prices", JSON.stringify(history));
+
+        // ⚡ ALWAYS UPDATE CURRENT CACHE
+        await platform.env.GOLD_KV.put("current_prices", JSON.stringify({
+            data: { current: success, history: history },
+            timestamp: Date.now()
+        }));
 
         // 🎯 FILTER CHANGED ITEMS
         const formattedItems = success.map(item => {

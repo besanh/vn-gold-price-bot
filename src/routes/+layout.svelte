@@ -48,12 +48,12 @@
 				</button>
 			</div>
 			<h1>
-				<span lang="en">GOLD PRICE</span>
-				<span lang="vi">BẢNG GIÁ VÀNG</span>
+				<span lang="en">Live Gold Prices Vietnam</span>
+				<span lang="vi">Giá Vàng Trực Tuyến</span>
 			</h1>
 			<p class="subtitle">
-				<span lang="en">Live market prices from Mi Hong & SJC</span>
-				<span lang="vi">Giá thị trường trực tuyến từ Mi Hồng & SJC</span>
+				<span lang="en">Real-time market updates from Mi Hong & SJC</span>
+				<span lang="vi">Cập nhật giá vàng Mi Hồng & SJC hôm nay</span>
 			</p>
 		</header>
 

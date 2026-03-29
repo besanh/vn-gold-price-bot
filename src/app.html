@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
 
 <head>
 	<meta charset="utf-8" />
@@ -25,7 +25,8 @@
 	<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-	<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet" />
+	<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet"
+		media="print" onload="this.media='all'" />
 	<script>
 		(function () {
 			const theme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -34,7 +35,6 @@
 			document.documentElement.setAttribute('lang', lang);
 		})();
 	</script>
-	<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 	<link rel="canonical" href="https://anhle.gold-prices-bot.workers.dev/" />
 	%sveltekit.head%
 </head>

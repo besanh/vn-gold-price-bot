@@ -10,15 +10,39 @@
 	
 	let chartCanvas: HTMLCanvasElement;
 	let trendChart: any;
+	let ChartLib: any;
+	let chartVisible = $state(false);
+
+	// 📊 Lazy-load Chart.js only when needed
+	async function loadChartLib() {
+		if (ChartLib) return ChartLib;
+		const { Chart, LineController, LineElement, PointElement, LinearScale, Title, CategoryScale, Legend, Tooltip } = await import('chart.js');
+		Chart.register(LineController, LineElement, PointElement, LinearScale, Title, CategoryScale, Legend, Tooltip);
+		ChartLib = Chart;
+		return Chart;
+	}
+
+	onMount(() => {
+		const observer = new IntersectionObserver((entries) => {
+			if (entries[0].isIntersecting) {
+				chartVisible = true;
+				observer.disconnect();
+			}
+		}, { rootMargin: '100px' });
+		
+		if (chartCanvas) observer.observe(chartCanvas);
+		return () => observer.disconnect();
+	});
 
 	// Reactive chart initialization on data or UI state changes
 	$effect(() => {
-		if (chartCanvas && data.history && uiState.lang && uiState.theme) {
+		if (chartVisible && chartCanvas && data.history && uiState.lang && uiState.theme) {
 			initChart();
 		}
 	});
 
-	function initChart() {
+	async function initChart() {
+		const Chart = await loadChartLib();
 		const ctx = chartCanvas.getContext('2d');
 		if (!ctx) return;
 
@@ -64,7 +88,6 @@
 
 		if (trendChart) trendChart.destroy();
 		
-		// @ts-ignore
 		trendChart = new Chart(ctx, {
 			type: 'line',
 			data: { datasets },
@@ -180,11 +203,6 @@
 </svelte:head>
 
 <main class="container">
-	<h1 class="page-title">
-		<span lang="en">Live Gold Prices in Vietnam</span>
-		<span lang="vi">Giá Vàng Trực Tuyến Việt Nam</span>
-	</h1>
-
 	<div style="display: flex; justify-content: center; gap: 1rem; align-items: center; margin-bottom: 2.5rem; flex-wrap: wrap;">
 		<button class="btn-sync" onclick={handleSync} class:htmx-request={isSyncing}>
 			<div class="spinner"></div>
