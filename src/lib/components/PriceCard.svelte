@@ -12,7 +12,7 @@
 
 <div class="card price-card">
 	<div class="source-tag">{sourceName}</div>
-	<div class="gold-name">{item.name}</div>
+	<h3 class="gold-name">{item.name}</h3>
 	<div class="price-row">
 		<span class="price-label">
 			<span lang="en">Buy</span>
