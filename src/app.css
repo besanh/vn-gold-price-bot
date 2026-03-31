@@ -345,6 +345,7 @@ input:checked+.slider:before {
 	grid-column: 1 / -1;
 	height: 450px;
 	padding: 1.5rem;
+	position: relative;
 }
 
 canvas {

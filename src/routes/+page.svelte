@@ -8,8 +8,8 @@
 
 	let { data } = $props<{ data: PageData }>();
 	
-	let chartCanvas: HTMLCanvasElement;
-	let trendChart: any;
+	let chartCanvas = $state<HTMLCanvasElement>();
+	let priceHistoryChart = $state<any>();
 	let ChartLib: any;
 	let chartVisible = $state(false);
 
@@ -78,17 +78,17 @@
 				borderColor: cfg.color,
 				backgroundColor: 'transparent',
 				stepped: true,
-				borderWidth: 1,
-				pointRadius: 0,
-				pointHoverRadius: 5,
+				borderWidth: 2,
+				pointRadius: sortedData.length <= 1 ? 4 : 0,
+				pointHoverRadius: 6,
 				fill: false,
 				spanGaps: true
 			};
 		});
 
-		if (trendChart) trendChart.destroy();
+		if (priceHistoryChart) priceHistoryChart.destroy();
 		
-		trendChart = new Chart(ctx, {
+		priceHistoryChart = new Chart(ctx, {
 			type: 'line',
 			data: { datasets },
 			options: {
@@ -106,10 +106,11 @@
 							title: (items: any) => {
 								if (!items.length) return '';
 								const d = new Date(items[0].parsed.x);
-								const h = d.getHours();
-								const dd = d.getDate();
-								const mm = d.getMonth() + 1;
-								return `${dd}/${mm} ${h}h`;
+								const h = d.getHours().toString().padStart(2, '0');
+								const min = d.getMinutes().toString().padStart(2, '0');
+								const dd = d.getDate().toString().padStart(2, '0');
+								const mm = (d.getMonth() + 1).toString().padStart(2, '0');
+								return `${dd}/${mm} ${h}:${min}`;
 							},
 							label: (ctx: any) => ctx.dataset.label + ': ' + new Intl.NumberFormat('vi-VN').format(ctx.parsed.y) + ' VND'
 						}
@@ -122,16 +123,17 @@
 							color: textColor, maxTicksLimit: 12,
 							callback: (v: any) => { 
 								const d = new Date(v); 
-								const h = d.getHours();
+								const h = d.getHours().toString().padStart(2, '0');
+								const min = d.getMinutes().toString().padStart(2, '0');
 								const dd = d.getDate();
 								const mm = d.getMonth() + 1;
-								return `${dd}/${mm} ${h}h`;
+								return `${dd}/${mm} ${h}:${min}`;
 							}
 						},
 						grid: { color: gridColor }
 					},
 					y: {
-						ticks: { color: textColor, callback: (v: any) => (v / 1000000).toFixed(1) + 'M' },
+						ticks: { color: textColor, callback: (v: any) => (v / 1000000).toFixed(2) + 'M' },
 						grid: { color: gridColor }
 					}
 				}
