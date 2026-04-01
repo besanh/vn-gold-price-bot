@@ -5,7 +5,9 @@ export type GoldItem = {
     buy: number;
     sell: number;
     change_sell: number;
-    delta: number;
+    change_buy: number;
+    delta_sell: number;
+    delta_buy: number;
     time: string;
     date: string;
 };
