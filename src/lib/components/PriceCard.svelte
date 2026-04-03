@@ -1,16 +1,20 @@
 <script lang="ts">
 	import type { GoldItem } from '$lib/types';
+	import { uiState } from '$lib/uiState.svelte';
 
 	let { item } = $props<{ item: GoldItem }>();
 
-	const isBuyUp = $derived(item.delta_buy > 0);
-	const isBuyDown = $derived(item.delta_buy < 0);
-	const buyChangeClass = $derived(isBuyUp ? 'up' : isBuyDown ? 'down' : 'none');
+	const buyDelta = $derived(Number(item.delta_buy) || 0);
+	const sellDelta = $derived(Number(item.delta_sell) || 0);
+	const buyChange = $derived(Number(item.change_buy) || 0);
+	const sellChange = $derived(Number(item.change_sell) || 0);
+
+	const isBuyUp = $derived(buyDelta > 0 || (buyDelta === 0 && buyChange > 0));
+	const isBuyDown = $derived(buyDelta < 0 || (buyDelta === 0 && buyChange < 0));
 	const buyChangeSign = $derived(isBuyUp ? '↑' : isBuyDown ? '↓' : '—');
 
-	const isSellUp = $derived(item.delta_sell > 0);
-	const isSellDown = $derived(item.delta_sell < 0);
-	const sellChangeClass = $derived(isSellUp ? 'up' : isSellDown ? 'down' : 'none');
+	const isSellUp = $derived(sellDelta > 0 || (sellDelta === 0 && sellChange > 0));
+	const isSellDown = $derived(sellDelta < 0 || (sellDelta === 0 && sellChange < 0));
 	const sellChangeSign = $derived(isSellUp ? '↑' : isSellDown ? '↓' : '—');
 
 	const sourceName = $derived(item.source === 'MH' ? 'Mi Hong' : 'SJC');
@@ -19,7 +23,7 @@
 <div class="card price-card">
 	<div class="card-header">
 		<div class="source-tag">{sourceName}</div>
-		<div class="sync-time">Updated: {item.time}</div>
+		<div class="sync-time">{uiState.lang === 'en' ? 'Updated' : 'Cập nhật'}: {item.time}</div>
 	</div>
 
 	<h2 class="gold-name">{item.name}</h2>
@@ -28,12 +32,10 @@
 		<div class="price-row">
 			<div class="price-info">
 				<span class="price-label">
-					<span lang="en">Buy</span>
-					<span lang="vi">Mua</span>
+					{uiState.lang === 'en' ? 'Buy' : 'Mua'}
 				</span>
 				<span class="unit">
-					<span lang="en">VND/mace</span>
-					<span lang="vi">VND/chỉ</span>
+					{uiState.lang === 'en' ? 'VND/mace' : 'VND/chỉ'}
 				</span>
 			</div>
 			<span class="price-val">{item.buy.toLocaleString('vi-VN')}</span>
@@ -41,12 +43,10 @@
 		<div class="price-row">
 			<div class="price-info">
 				<span class="price-label">
-					<span lang="en">Sell</span>
-					<span lang="vi">Bán</span>
+					{uiState.lang === 'en' ? 'Sell' : 'Bán'}
 				</span>
 				<span class="unit">
-					<span lang="en">VND/mace</span>
-					<span lang="vi">VND/chỉ</span>
+					{uiState.lang === 'en' ? 'VND/mace' : 'VND/chỉ'}
 				</span>
 			</div>
 			<span class="price-val price-sell">{item.sell.toLocaleString('vi-VN')}</span>
@@ -54,22 +54,20 @@
 	</div>
 
 	<div class="trends-grid">
-		<div class="trend-item {buyChangeClass}">
+		<div class="trend-item" class:up={isBuyUp} class:down={isBuyDown} class:none={!isBuyUp && !isBuyDown}>
 			<span class="trend-label">
-				<span lang="en">Buy Change</span>
-				<span lang="vi">Biến động Mua</span>
+				{uiState.lang === 'en' ? 'Buy Change' : 'Biến động Mua'}
 			</span>
 			<span class="trend-value">
-				{buyChangeSign} {Math.abs(Number(item.delta_buy) || 0).toLocaleString('vi-VN')}
+				{buyChangeSign} {Math.abs(buyDelta || buyChange).toLocaleString('vi-VN')}
 			</span>
 		</div>
-		<div class="trend-item {sellChangeClass}">
+		<div class="trend-item" class:up={isSellUp} class:down={isSellDown} class:none={!isSellUp && !isSellDown}>
 			<span class="trend-label">
-				<span lang="en">Sell Change</span>
-				<span lang="vi">Biến động Bán</span>
+				{uiState.lang === 'en' ? 'Sell Change' : 'Biến động Bán'}
 			</span>
 			<span class="trend-value">
-				{sellChangeSign} {Math.abs(Number(item.delta_sell) || 0).toLocaleString('vi-VN')}
+				{sellChangeSign} {Math.abs(sellDelta || sellChange).toLocaleString('vi-VN')}
 			</span>
 		</div>
 	</div>
@@ -140,25 +138,16 @@
 		font-family: monospace;
 	}
 
-	.up {
+	/* Explicitly target trend items with high specificity */
+	.trend-item.up, .trend-item.up .trend-value {
 		color: var(--up) !important;
 	}
 
-	.down {
+	.trend-item.down, .trend-item.down .trend-value {
 		color: var(--down) !important;
 	}
 
-	.trend-item.up {
-		background: rgba(52, 211, 153, 0.12);
-		border: 1px solid rgba(52, 211, 153, 0.2);
-	}
-
-	.trend-item.down {
-		background: rgba(248, 113, 113, 0.12);
-		border: 1px solid rgba(248, 113, 113, 0.2);
-	}
-
-	.none {
-		opacity: 0.6;
+	.trend-item.none {
+		opacity: 0.5;
 	}
 </style>
