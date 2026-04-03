@@ -1,15 +1,25 @@
 import type { GoldItem, HistoryData } from '$lib/types';
 
+function parseValue(val: any): number {
+    if (typeof val === 'number') return val;
+    if (typeof val === 'string') {
+        const clean = val.replace(/,/g, '');
+        return parseFloat(clean) || 0;
+    }
+    return 0;
+}
+
 export async function getDashboardData(platform: App.Platform) {
     const giaVangTypes = ["SJL1L10", "SJ9999"];
     const miHongCodes = ["SJC"];
 
-    // ⚡ TRY CACHE FIRST
+    // ⚡ TRY CACHE FIRST (TTL: 2 mins)
     const cachedRaw = await platform.env.GOLD_KV.get("current_prices");
     if (cachedRaw) {
         try {
             const cached = JSON.parse(cachedRaw);
-            if (cached && cached.data && Array.isArray(cached.data.current)) {
+            const cacheAge = Date.now() - (cached.timestamp || 0);
+            if (cacheAge < 120000 && cached && cached.data && Array.isArray(cached.data.current)) {
                 // Sanitize cached data to prevent NaN leakage
                 cached.data.current = cached.data.current.map((item: GoldItem) => ({
                     ...item,
@@ -17,8 +27,8 @@ export async function getDashboardData(platform: App.Platform) {
                     sell: Number(item.sell) || 0,
                     change_buy: Number(item.change_buy) || 0,
                     change_sell: Number(item.change_sell) || 0,
-                    delta_buy: Number(item.delta_buy) || 0,
-                    delta_sell: Number(item.delta_sell) || 0
+                    delta_buy: (Number(item.delta_buy) === item.buy) ? 0 : (Number(item.delta_buy) || 0),
+                    delta_sell: (Number(item.delta_sell) === item.sell) ? 0 : (Number(item.delta_sell) || 0)
                 }));
                 return cached.data;
             }
@@ -37,6 +47,9 @@ export async function getDashboardData(platform: App.Platform) {
     const historyRaw = await platform.env.GOLD_KV.get("history_prices");
     const history: HistoryData = historyRaw ? JSON.parse(historyRaw) : {};
 
+    const lastRaw = await platform.env.GOLD_KV.get("last_prices");
+    const lastPrices = lastRaw ? JSON.parse(lastRaw) : {};
+
     const current: GoldItem[] = results
         .filter(r => r.status === "fulfilled")
         .flatMap((r: any) => Array.isArray(r.value) ? r.value : [r.value])
@@ -44,6 +57,7 @@ export async function getDashboardData(platform: App.Platform) {
             const key = `${item.source}_${item.type}`;
             const itemHistory = history[key] || [];
             const lastEntry = itemHistory.length > 0 ? itemHistory[itemHistory.length - 1] : null;
+            const lastBaseline = lastPrices[key];
 
             let change_sell = Number(item.change_sell) || 0;
             let change_buy = Number(item.change_buy) || 0;
@@ -56,12 +70,17 @@ export async function getDashboardData(platform: App.Platform) {
 
             return {
                 ...item,
-                name: item.name.includes("Nhẫn") ? "SJC Ring" :
-                    item.name.includes("99,99") ? "SJC 9999" :
+                name: item.name.includes("Nhẫn") || item.name.includes("Ring") ? "SJC Ring" :
+                    item.name.includes("9999") || item.name.includes("99,99") ? "SJC 9999" :
                         item.name.includes("Mi Hồng") ? "Mi Hồng SJC" : item.name,
                 change_sell: isNaN(change_sell) ? 0 : change_sell,
-                change_buy: isNaN(change_buy) ? 0 : change_buy
+                change_buy: isNaN(change_buy) ? 0 : change_buy,
+                delta_sell: lastBaseline && (typeof lastBaseline === 'number' ? lastBaseline > 0 : lastBaseline.sell > 0) ? (item.sell - (typeof lastBaseline === 'number' ? lastBaseline : lastBaseline.sell)) : 0,
+                delta_buy: lastBaseline && typeof lastBaseline !== 'number' && lastBaseline.buy > 0 ? (item.buy - lastBaseline.buy) : 0
             };
+            if (item.delta_sell === item.sell) item.delta_sell = 0;
+            if (item.delta_buy === item.buy) item.delta_buy = 0;
+            return item;
         });
 
     const allowedKeys = [
@@ -97,10 +116,10 @@ async function fetchGiaVang(type: string): Promise<GoldItem> {
         source: "GV",
         type,
         name: item.name || type,
-        buy: Number(item.buy) / 10 || 0,
-        sell: Number(item.sell) / 10 || 0,
-        change_sell: (Number(item.change_sell) || 0) / 10,
-        change_buy: (Number(item.change_buy) || 0) / 10,
+        buy: parseValue(item.buy) / 10 || 0,
+        sell: parseValue(item.sell) / 10 || 0,
+        change_sell: (parseValue(item.change_sell) || 0) / 10,
+        change_buy: (parseValue(item.change_buy) || 0) / 10,
         delta_sell: 0,
         delta_buy: 0,
         time: item.time,
@@ -122,10 +141,10 @@ async function fetchMiHong(codes: string[]): Promise<GoldItem[]> {
             source: "MH",
             type: item.code,
             name: `Mi Hồng ${item.code}`,
-            buy: Number(item.buyingPrice) || 0,
-            sell: Number(item.sellingPrice) || 0,
-            change_sell: Number(item.sellChange) || 0,
-            change_buy: Number(item.buyChange) || 0,
+            buy: parseValue(item.buyingPrice) || 0,
+            sell: parseValue(item.sellingPrice) || 0,
+            change_sell: parseValue(item.sellChange) || 0,
+            change_buy: parseValue(item.buyChange) || 0,
             delta_sell: 0,
             delta_buy: 0,
             time: item.dateTime.split(" ")[1],
@@ -145,7 +164,13 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
         const results = await Promise.allSettled(tasks);
         const success: GoldItem[] = results
             .filter(r => r.status === "fulfilled")
-            .flatMap((r: any) => Array.isArray(r.value) ? r.value : [r.value]);
+            .flatMap((r: any) => Array.isArray(r.value) ? r.value : [r.value])
+            .map(item => ({
+                ...item,
+                name: item.name.includes("Nhẫn") || item.name.includes("Ring") ? "SJC Ring" :
+                    item.name.includes("9999") || item.name.includes("99,99") ? "SJC 9999" :
+                        item.name.includes("Mi Hồng") ? "Mi Hồng SJC" : item.name
+            }));
 
         // 🗑️ ALWAYS CLEANUP OLD DATA (runs even if APIs fail)
         const historyDays = parseInt(platform.env.HISTORY_DAYS || "3");
@@ -237,7 +262,20 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
 
         // ⚡ UPDATE CURRENT CACHE ONLY IF DATA CHANGED
         let currentCacheChanged = true;
-        const currentPricesData = { current: success, history: history };
+        const formattedWithDeltas = success.map(item => {
+            const key = `${item.source}_${item.type}`;
+            const last = lastPrices[key];
+            const res = {
+                ...item,
+                delta_sell: last && last.sell > 0 ? (item.sell - last.sell) : 0,
+                delta_buy: last && last.buy > 0 ? (item.buy - last.buy) : 0
+            };
+            if (res.delta_sell === item.sell) res.delta_sell = 0;
+            if (res.delta_buy === item.buy) res.delta_buy = 0;
+            return res;
+        });
+
+        const currentPricesData = { current: formattedWithDeltas, history: history };
         const currentRaw = await platform.env.GOLD_KV.get("current_prices");
 
         if (currentRaw) {
@@ -289,24 +327,12 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
             console.log("⏸ No data changes, skipping cache writes");
         }
 
-        // 🎯 FILTER CHANGED ITEMS
-        const formattedItems = success.map(item => {
-            const key = `${item.source}_${item.type}`;
-            const last = lastPrices[key];
-            return {
-                ...item,
-                delta_sell: last ? item.sell - last.sell : 0,
-                delta_buy: last ? item.buy - last.buy : 0
-            };
-        });
-
-        const changedItems = formattedItems.filter(item => {
+        // 🎯 FILTER CHANGED ITEMS (using formatted items which already have deltas)
+        const itemsToReport = isManual ? formattedWithDeltas : formattedWithDeltas.filter(item => {
             const key = `${item.source}_${item.type}`;
             const last = lastPrices[key];
             return !last || Math.abs(item.sell - last.sell) > threshold || Math.abs(item.buy - last.buy) > threshold;
         });
-
-        const itemsToReport = isManual ? formattedItems : changedItems;
 
         if (!isManual && !changed) {
             console.log("⏸ No changes to report");
@@ -383,8 +409,8 @@ function buildMessage(list: GoldItem[]) {
 function generateChartUrl(current: GoldItem[], history: Record<string, { p: number, t: number }[]>) {
     const typeConfig: Record<string, { label: string, color: string }> = {
         'MH_SJC': { label: 'Mi Hồng SJC', color: '#f59e0b' },
-        'GV_SJ9999': { label: 'SJC 9999', color: '#0ea5e9' },
-        'GV_SJL1L10': { label: 'SJC Ring', color: '#10b981' }
+        'GV_SJ9999': { label: 'SJC Ring', color: '#0ea5e9' },
+        'GV_SJL1L10': { label: 'SJC 9999', color: '#10b981' }
     };
     if (!current.length) return "";
 

@@ -3,13 +3,13 @@
 
 	let { item } = $props<{ item: GoldItem }>();
 
-	const isBuyUp = $derived(item.change_buy > 0);
-	const isBuyDown = $derived(item.change_buy < 0);
+	const isBuyUp = $derived(item.delta_buy > 0);
+	const isBuyDown = $derived(item.delta_buy < 0);
 	const buyChangeClass = $derived(isBuyUp ? 'up' : isBuyDown ? 'down' : 'none');
 	const buyChangeSign = $derived(isBuyUp ? '↑' : isBuyDown ? '↓' : '—');
 
-	const isSellUp = $derived(item.change_sell > 0);
-	const isSellDown = $derived(item.change_sell < 0);
+	const isSellUp = $derived(item.delta_sell > 0);
+	const isSellDown = $derived(item.delta_sell < 0);
 	const sellChangeClass = $derived(isSellUp ? 'up' : isSellDown ? 'down' : 'none');
 	const sellChangeSign = $derived(isSellUp ? '↑' : isSellDown ? '↓' : '—');
 
@@ -17,21 +17,40 @@
 </script>
 
 <div class="card price-card">
-	<div class="source-tag">{sourceName}</div>
-	<h2 class="gold-name">{item.name}</h2>
-	<div class="price-row">
-		<span class="price-label">
-			<span lang="en">Buy</span>
-			<span lang="vi">Mua</span>
-		</span>
-		<span class="price-val">{item.buy.toLocaleString('vi-VN')}</span>
+	<div class="card-header">
+		<div class="source-tag">{sourceName}</div>
+		<div class="sync-time">Updated: {item.time}</div>
 	</div>
-	<div class="price-row">
-		<span class="price-label">
-			<span lang="en">Sell</span>
-			<span lang="vi">Bán</span>
-		</span>
-		<span class="price-val price-sell">{item.sell.toLocaleString('vi-VN')}</span>
+
+	<h2 class="gold-name">{item.name}</h2>
+
+	<div class="price-rows">
+		<div class="price-row">
+			<div class="price-info">
+				<span class="price-label">
+					<span lang="en">Buy</span>
+					<span lang="vi">Mua</span>
+				</span>
+				<span class="unit">
+					<span lang="en">VND/mace</span>
+					<span lang="vi">VND/chỉ</span>
+				</span>
+			</div>
+			<span class="price-val">{item.buy.toLocaleString('vi-VN')}</span>
+		</div>
+		<div class="price-row">
+			<div class="price-info">
+				<span class="price-label">
+					<span lang="en">Sell</span>
+					<span lang="vi">Bán</span>
+				</span>
+				<span class="unit">
+					<span lang="en">VND/mace</span>
+					<span lang="vi">VND/chỉ</span>
+				</span>
+			</div>
+			<span class="price-val price-sell">{item.sell.toLocaleString('vi-VN')}</span>
+		</div>
 	</div>
 
 	<div class="trends-grid">
@@ -41,7 +60,7 @@
 				<span lang="vi">Biến động Mua</span>
 			</span>
 			<span class="trend-value">
-				{buyChangeSign} {Math.abs(Number(item.change_buy) || 0).toLocaleString('vi-VN')}
+				{buyChangeSign} {Math.abs(Number(item.delta_buy) || 0).toLocaleString('vi-VN')}
 			</span>
 		</div>
 		<div class="trend-item {sellChangeClass}">
@@ -50,13 +69,43 @@
 				<span lang="vi">Biến động Bán</span>
 			</span>
 			<span class="trend-value">
-				{sellChangeSign} {Math.abs(Number(item.change_sell) || 0).toLocaleString('vi-VN')}
+				{sellChangeSign} {Math.abs(Number(item.delta_sell) || 0).toLocaleString('vi-VN')}
 			</span>
 		</div>
 	</div>
 </div>
 
 <style>
+	.card-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0.5rem;
+	}
+
+	.sync-time {
+		font-size: 0.7rem;
+		opacity: 0.5;
+		font-family: monospace;
+	}
+
+	.price-rows {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.price-info {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.unit {
+		font-size: 0.6rem;
+		opacity: 0.4;
+		margin-top: -2px;
+	}
+
 	.trends-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
@@ -93,12 +142,20 @@
 
 	.up {
 		color: var(--up) !important;
-		background: rgba(52, 211, 153, 0.08);
 	}
 
 	.down {
 		color: var(--down) !important;
-		background: rgba(248, 113, 113, 0.08);
+	}
+
+	.trend-item.up {
+		background: rgba(52, 211, 153, 0.12);
+		border: 1px solid rgba(52, 211, 153, 0.2);
+	}
+
+	.trend-item.down {
+		background: rgba(248, 113, 113, 0.12);
+		border: 1px solid rgba(248, 113, 113, 0.2);
 	}
 
 	.none {

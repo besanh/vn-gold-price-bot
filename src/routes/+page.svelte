@@ -52,8 +52,8 @@
 
 		const typeConfig: Record<string, any> = {
 			'MH_SJC': { en: 'Mi Hong SJC', vn: 'Mi Hồng SJC', color: '#f59e0b' },
-			'GV_SJ9999': { en: 'SJC 9999', vn: 'SJC 9999', color: '#0ea5e9' },
-			'GV_SJL1L10': { en: 'SJC Ring', vn: 'SJC Nhẫn Quý', color: '#10b981' }
+			'GV_SJ9999': { en: 'SJC Ring', vn: 'Nhẫn SJC', color: '#0ea5e9' },
+			'GV_SJL1L10': { en: 'SJC 9999', vn: 'SJC 9999', color: '#10b981' }
 		};
 
 		const lang = uiState.lang;
@@ -133,6 +133,7 @@
 						grid: { color: gridColor }
 					},
 					y: {
+						title: { display: true, text: uiState.lang === 'vi' ? 'VND/chỉ' : 'VND/mace', color: textColor, font: { size: 10 } },
 						ticks: { color: textColor, callback: (v: any) => (v / 1000000).toFixed(2) + 'M' },
 						grid: { color: gridColor }
 					}
