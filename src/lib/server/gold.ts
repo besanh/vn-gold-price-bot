@@ -68,6 +68,9 @@ export async function getDashboardData(platform: App.Platform) {
                 }
             }
 
+            const delta_sell = lastBaseline && (typeof lastBaseline === 'number' ? lastBaseline > 0 : lastBaseline.sell > 0) ? (item.sell - (typeof lastBaseline === 'number' ? lastBaseline : lastBaseline.sell)) : 0;
+            const delta_buy = lastBaseline && typeof lastBaseline !== 'number' && lastBaseline.buy > 0 ? (item.buy - lastBaseline.buy) : 0;
+
             return {
                 ...item,
                 name: item.name.includes("Nhẫn") || item.name.includes("Ring") ? "SJC Ring" :
@@ -75,12 +78,9 @@ export async function getDashboardData(platform: App.Platform) {
                         item.name.includes("Mi Hồng") ? "Mi Hồng SJC" : item.name,
                 change_sell: isNaN(change_sell) ? 0 : change_sell,
                 change_buy: isNaN(change_buy) ? 0 : change_buy,
-                delta_sell: lastBaseline && (typeof lastBaseline === 'number' ? lastBaseline > 0 : lastBaseline.sell > 0) ? (item.sell - (typeof lastBaseline === 'number' ? lastBaseline : lastBaseline.sell)) : 0,
-                delta_buy: lastBaseline && typeof lastBaseline !== 'number' && lastBaseline.buy > 0 ? (item.buy - lastBaseline.buy) : 0
+                delta_sell: delta_sell === item.sell ? 0 : delta_sell,
+                delta_buy: delta_buy === item.buy ? 0 : delta_buy
             };
-            if (item.delta_sell === item.sell) item.delta_sell = 0;
-            if (item.delta_buy === item.buy) item.delta_buy = 0;
-            return item;
         });
 
     const allowedKeys = [
@@ -366,7 +366,12 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
                     });
                     await platform.env.GOLD_KV.put("last_prices", JSON.stringify(updatedPrices));
                     console.log("✅ Baseline updated in KV after notification");
+                } else {
+                    const errorText = await tgRes.text();
+                    console.error(`❌ Telegram failed: ${tgRes.status} - ${errorText}`);
                 }
+            } else {
+                console.error("❌ TOKEN or CHAT_ID missing in platform.env");
             }
         }
 
