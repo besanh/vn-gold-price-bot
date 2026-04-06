@@ -94,7 +94,32 @@ export async function getDashboardData(platform: App.Platform) {
 
     const responseData = { current, history: filteredHistory };
 
-    // Update cache in background
+    // 📈 UPDATE HISTORY (Chart)
+    let historyChanged = false;
+    current.forEach(item => {
+        const key = `${item.source}_${item.type}`;
+        if (!history[key]) history[key] = [];
+        const len = history[key].length;
+        const lastEntry = len > 0 ? history[key][len - 1] : null;
+
+        // Add point if price changed or if no point exists for the last hour
+        if (!lastEntry || lastEntry.p !== item.sell || (Date.now() - lastEntry.t > 3600000)) {
+            history[key].push({ p: item.sell, t: Date.now() });
+            historyChanged = true;
+        }
+    });
+
+    if (historyChanged) {
+        // Cleanup old points first
+        const historyDays = parseInt(platform.env.HISTORY_DAYS || "3");
+        const cutoff = Date.now() - (historyDays * 24 * 60 * 60 * 1000);
+        Object.keys(history).forEach(key => {
+            history[key] = history[key].filter(entry => entry.t > cutoff);
+        });
+        await platform.env.GOLD_KV.put("history_prices", JSON.stringify(history));
+    }
+
+    // Update current cache in background
     await platform.env.GOLD_KV.put("current_prices", JSON.stringify({
         data: responseData,
         timestamp: Date.now()
@@ -229,15 +254,20 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
             }
         }
 
-        // 🔍 DETECT CHANGE
-        const threshold = parseInt(platform.env.THRESHOLD || "50000");
+        // 🔍 DETECT CHANGE (0 = notify on any change)
+        const threshold = parseInt(platform.env.THRESHOLD || "0");
         let changed = false;
         for (const item of success) {
             const key = `${item.source}_${item.type}`;
             const last = lastPrices[key];
-            if (!last || Math.abs(item.sell - last.sell) > threshold || Math.abs(item.buy - last.buy) > threshold) {
+            const deltaSell = last ? Math.abs(item.sell - last.sell) : 0;
+            const deltaBuy = last ? Math.abs(item.buy - last.buy) : 0;
+
+            console.log(`🔍 [${key}] Current: ${item.sell}, Last: ${last?.sell || 'N/A'}, Delta: ${deltaSell}, Threshold: ${threshold}`);
+
+            if (deltaSell > threshold || deltaBuy > threshold || !last) {
                 changed = true;
-                break;
+                console.log(`🎯 [${key}] Change detected! Triggering notification.`);
             }
         }
 
@@ -260,22 +290,8 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
             console.log("📈 History updated in KV");
         }
 
-        // ⚡ UPDATE CURRENT CACHE ONLY IF DATA CHANGED
+        // ⚡ UPDATE CURRENT CACHE & TRENDS
         let currentCacheChanged = true;
-        const formattedWithDeltas = success.map(item => {
-            const key = `${item.source}_${item.type}`;
-            const last = lastPrices[key];
-            const res = {
-                ...item,
-                delta_sell: last && last.sell > 0 ? (item.sell - last.sell) : 0,
-                delta_buy: last && last.buy > 0 ? (item.buy - last.buy) : 0
-            };
-            if (res.delta_sell === item.sell) res.delta_sell = 0;
-            if (res.delta_buy === item.buy) res.delta_buy = 0;
-            return res;
-        });
-
-        const currentPricesData = { current: formattedWithDeltas, history: history };
         const currentRaw = await platform.env.GOLD_KV.get("current_prices");
 
         if (currentRaw) {
@@ -317,6 +333,21 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
             } catch (e) { }
         }
 
+        const formattedWithDeltas = success.map(item => {
+            const key = `${item.source}_${item.type}`;
+            const last = lastPrices[key];
+            const res = {
+                ...item,
+                delta_sell: (last && last.sell > 0) ? (item.sell - last.sell) : 0,
+                delta_buy: (last && last.buy > 0) ? (item.buy - last.buy) : 0
+            };
+            if (res.delta_sell === item.sell) res.delta_sell = 0;
+            if (res.delta_buy === item.buy) res.delta_buy = 0;
+            return res;
+        });
+
+        const currentPricesData = { current: formattedWithDeltas, history: history };
+
         if (currentCacheChanged || isManual) {
             await platform.env.GOLD_KV.put("current_prices", JSON.stringify({
                 data: currentPricesData,
@@ -327,17 +358,25 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
             console.log("⏸ No data changes, skipping cache writes");
         }
 
-        // 🎯 FILTER CHANGED ITEMS (using formatted items which already have deltas)
-        const itemsToReport = isManual ? formattedWithDeltas : formattedWithDeltas.filter(item => {
-            const key = `${item.source}_${item.type}`;
-            const last = lastPrices[key];
-            return !last || Math.abs(item.sell - last.sell) > threshold || Math.abs(item.buy - last.buy) > threshold;
-        });
+        // ⏰ DAILY HEARTBEAT (Force send at 8 AM ICT)
+        const dateICT = new Date(now + (7 * 3600000));
+        const hourICT = dateICT.getUTCHours();
+        const isHeartbeatHour = hourICT === 8;
+
+        if (isHeartbeatHour && !isManual) {
+            console.log("⏱ Daily heartbeat triggered (8 AM ICT). Forcing notification.");
+            changed = true;
+        }
 
         if (!isManual && !changed) {
-            console.log("⏸ No changes to report");
+            console.log("⏸ No significant changes and not heartbeat hour. Skipping Telegram.");
             return;
         }
+
+        // 🎯 FILTER CHANGED ITEMS
+        const itemsToReport = (isManual || isHeartbeatHour) ? formattedWithDeltas : formattedWithDeltas.filter(item => {
+            return item.delta_sell !== 0 || item.delta_buy !== 0;
+        });
 
         // 📩 SEND TELEGRAM
         if (isManual || changed) {
@@ -345,6 +384,7 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
             const chartUrl = generateChartUrl(success, history);
 
             if (platform.env.TOKEN && platform.env.CHAT_ID) {
+                console.log(`📡 Sending Telegram message (Items: ${itemsToReport.length})...`);
                 const tgRes = await fetch(`https://api.telegram.org/bot${platform.env.TOKEN}/sendMessage`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -352,6 +392,7 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
                 });
 
                 if (tgRes.ok) {
+                    console.log("✅ Telegram message sent successfully.");
                     await fetch(`https://api.telegram.org/bot${platform.env.TOKEN}/sendPhoto`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -365,13 +406,14 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
                         updatedPrices[key] = { buy: item.buy, sell: item.sell };
                     });
                     await platform.env.GOLD_KV.put("last_prices", JSON.stringify(updatedPrices));
-                    console.log("✅ Baseline updated in KV after notification");
+                    console.log("💾 Baseline updated in KV.");
                 } else {
                     const errorText = await tgRes.text();
-                    console.error(`❌ Telegram failed: ${tgRes.status} - ${errorText}`);
+                    console.error(`❌ Telegram API Error: ${tgRes.status} - ${errorText}`);
                 }
             } else {
-                console.error("❌ TOKEN or CHAT_ID missing in platform.env");
+                console.error("❌ CRITICAL: TELEGRAM_TOKEN or CHAT_ID is missing in platform.env!");
+                console.log("Current Env Keys:", Object.keys(platform.env));
             }
         }
 
@@ -393,18 +435,21 @@ function buildMessage(list: GoldItem[]) {
     const body = sources.map(source => {
         const items = groups[source];
         const sourceName = source === "MH" ? "🏢 <b>MI HONG SYSTEM</b>" : "🏦 <b>GOLD PRICE EXCHANGE</b>";
+
         return `${sourceName}\n${items.map(item => {
             const trendSell = item.delta_sell > 0 ? "📈" : item.delta_sell < 0 ? "📉" : "➖";
-            const deltaSellText = item.delta_sell !== 0 ? ` (<i>${item.delta_sell > 0 ? '↑' : '↓'}${Math.abs(item.delta_sell).toLocaleString("vi-VN")} VND</i>) ` : " ";
+            const deltaSellText = item.delta_sell !== 0 ? ` (<i>${item.delta_sell > 0 ? '↑' : '↓'}${Math.abs(item.delta_sell).toLocaleString("vi-VN")}</i>)` : "";
+            const todaySellText = item.change_sell !== 0 ? ` [Today: ${item.change_sell > 0 ? '+' : ''}${item.change_sell.toLocaleString("vi-VN")}]` : "";
 
             const trendBuy = item.delta_buy > 0 ? "📈" : item.delta_buy < 0 ? "📉" : "➖";
-            const deltaBuyText = item.delta_buy !== 0 ? ` (<i>${item.delta_buy > 0 ? '↑' : '↓'}${Math.abs(item.delta_buy).toLocaleString("vi-VN")} VND</i>) ` : " ";
+            const deltaBuyText = item.delta_buy !== 0 ? ` (<i>${item.delta_buy > 0 ? '↑' : '↓'}${Math.abs(item.delta_buy).toLocaleString("vi-VN")}</i>)` : "";
+            const todayBuyText = item.change_buy !== 0 ? ` [Today: ${item.change_buy > 0 ? '+' : ''}${item.change_buy.toLocaleString("vi-VN")}]` : "";
 
             return `
 💰 <b>${item.name}</b>
-├ 🟢 Buy:  <code>${item.buy.toLocaleString('vi-VN')} VND/mace</code>${deltaBuyText}${trendBuy}
-├ 🔴 Sell: <code>${item.sell.toLocaleString('vi-VN')} VND/mace</code>${deltaSellText}${trendSell}
-└ 🕒 <i>Updated: ${item.time} | ${item.date}</i>`;
+├ 🟢 Buy:  <code>${item.buy.toLocaleString('vi-VN')}</code>${deltaBuyText}${todayBuyText} ${trendBuy}
+├ 🔴 Sell: <code>${item.sell.toLocaleString('vi-VN')}</code>${deltaSellText}${todaySellText} ${trendSell}
+└ 🕒 <i>Refreshed: ${item.time} | ${item.date}</i>`;
         }).join("\n")}`;
     }).join("\n\n──────────────\n\n");
 
