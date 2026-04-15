@@ -9,7 +9,7 @@
 	"compatibility_flags": [
 		"nodejs_als"
 	],
-	"main": ".svelte-kit/cloudflare/_worker.js",
+	"main": "worker.ts",
 	"triggers": {
 		"crons": [
 			"*/5 * * * *"
@@ -18,7 +18,7 @@
 	"kv_namespaces": [
 		{
 			"binding": "GOLD_KV",
-			"id": "YOUR_KV_NAMESPACE_ID_HERE"
+			"id": "246d6b73549143be82ad37eea6d59c0c"
 		}
 	],
 	/**

@@ -12,6 +12,7 @@ function parseValue(val: any): number {
 export async function getDashboardData(platform: App.Platform) {
     const giaVangTypes = ["SJL1L10", "SJ9999"];
     const miHongCodes = ["SJC"];
+    const now = Date.now();
 
     // ⚡ TRY CACHE FIRST (TTL: 2 mins)
     const cachedRaw = await platform.env.GOLD_KV.get("current_prices");
@@ -19,17 +20,7 @@ export async function getDashboardData(platform: App.Platform) {
         try {
             const cached = JSON.parse(cachedRaw);
             const cacheAge = Date.now() - (cached.timestamp || 0);
-            if (cacheAge < 120000 && cached && cached.data && Array.isArray(cached.data.current)) {
-                // Sanitize cached data to prevent NaN leakage
-                cached.data.current = cached.data.current.map((item: GoldItem) => ({
-                    ...item,
-                    buy: Number(item.buy) || 0,
-                    sell: Number(item.sell) || 0,
-                    change_buy: Number(item.change_buy) || 0,
-                    change_sell: Number(item.change_sell) || 0,
-                    delta_buy: (Number(item.delta_buy) === item.buy) ? 0 : (Number(item.delta_buy) || 0),
-                    delta_sell: (Number(item.delta_sell) === item.sell) ? 0 : (Number(item.delta_sell) || 0)
-                }));
+            if (cacheAge < 120000 && cached?.data?.current) {
                 return cached.data;
             }
         } catch (e) {
@@ -55,31 +46,18 @@ export async function getDashboardData(platform: App.Platform) {
         .flatMap((r: any) => Array.isArray(r.value) ? r.value : [r.value])
         .map(item => {
             const key = `${item.source}_${item.type}`;
-            const itemHistory = history[key] || [];
-            const lastEntry = itemHistory.length > 0 ? itemHistory[itemHistory.length - 1] : null;
             const lastBaseline = lastPrices[key];
 
-            let change_sell = Number(item.change_sell) || 0;
-            let change_buy = Number(item.change_buy) || 0;
-
-            if (lastEntry && typeof lastEntry.p === 'number' && !isNaN(lastEntry.p)) {
-                if (item.sell !== lastEntry.p) {
-                    change_sell = item.sell - lastEntry.p;
-                }
-            }
-
-            const delta_sell = lastBaseline && (typeof lastBaseline === 'number' ? lastBaseline > 0 : lastBaseline.sell > 0) ? (item.sell - (typeof lastBaseline === 'number' ? lastBaseline : lastBaseline.sell)) : 0;
-            const delta_buy = lastBaseline && typeof lastBaseline !== 'number' && lastBaseline.buy > 0 ? (item.buy - lastBaseline.buy) : 0;
+            const delta_sell = lastBaseline ? (item.sell - lastBaseline.sell) : 0;
+            const delta_buy = lastBaseline ? (item.buy - lastBaseline.buy) : 0;
 
             return {
                 ...item,
                 name: item.name.includes("Nhẫn") || item.name.includes("Ring") ? "SJC Ring" :
                     item.name.includes("9999") || item.name.includes("99,99") ? "SJC 9999" :
                         item.name.includes("Mi Hồng") ? "Mi Hồng SJC" : item.name,
-                change_sell: isNaN(change_sell) ? 0 : change_sell,
-                change_buy: isNaN(change_buy) ? 0 : change_buy,
-                delta_sell: delta_sell === item.sell ? 0 : delta_sell,
-                delta_buy: delta_buy === item.buy ? 0 : delta_buy
+                delta_sell,
+                delta_buy
             };
         });
 
@@ -103,8 +81,8 @@ export async function getDashboardData(platform: App.Platform) {
         const lastEntry = len > 0 ? history[key][len - 1] : null;
 
         // Add point if price changed or if no point exists for the last hour
-        if (!lastEntry || lastEntry.p !== item.sell || (Date.now() - lastEntry.t > 3600000)) {
-            history[key].push({ p: item.sell, t: Date.now() });
+        if (!lastEntry || lastEntry.p !== item.sell || (now - lastEntry.t >= 3600000)) {
+            history[key].push({ p: item.sell, t: now });
             historyChanged = true;
         }
     });
@@ -177,8 +155,14 @@ async function fetchMiHong(codes: string[]): Promise<GoldItem[]> {
         }));
 }
 
-export async function runSyncJob(platform: App.Platform, isManual: boolean) {
+export async function runSyncJob(platform: App.Platform, isManual: boolean, reset: boolean = false) {
     try {
+        if (reset) {
+            console.log("🧹 Reset requested: Clearing KV data...");
+            await platform.env.GOLD_KV.delete("history_prices");
+            await platform.env.GOLD_KV.delete("last_prices");
+            await platform.env.GOLD_KV.delete("current_prices");
+        }
         const giaVangTypes = ["SJL1L10", "SJ9999"];
         const miHongCodes = ["SJC"];
         const tasks = [
@@ -197,7 +181,7 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
                         item.name.includes("Mi Hồng") ? "Mi Hồng SJC" : item.name
             }));
 
-        // 🗑️ ALWAYS CLEANUP OLD DATA (runs even if APIs fail)
+        // 🗑️ ALWAYS CLEANUP OLD HISTORY
         const historyDays = parseInt(platform.env.HISTORY_DAYS || "3");
         const now = Date.now();
         const cutoff = now - (historyDays * 24 * 60 * 60 * 1000);
@@ -205,28 +189,10 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
         let history: Record<string, { p: number, t: number }[]> = historyRaw ? JSON.parse(historyRaw) : {};
 
         let historyChanged = false;
-        const validKeys = new Set(success.map(item => `${item.source}_${item.type}`));
-
-        // Purge keys older than retention window, but keep a historical anchor for currently tracked items
         Object.keys(history).forEach(key => {
             const initialLen = history[key].length;
-
-            if (!validKeys.has(key)) {
-                history[key] = history[key].filter(entry => entry.t > cutoff);
-            } else {
-                let keepIndex = 0;
-                for (let i = history[key].length - 1; i >= 0; i--) {
-                    if (history[key][i].t <= cutoff) {
-                        keepIndex = i;
-                        break;
-                    }
-                }
-                history[key] = history[key].slice(keepIndex);
-            }
-
-            if (history[key].length !== initialLen) {
-                historyChanged = true;
-            }
+            history[key] = history[key].filter(entry => entry.t > cutoff);
+            if (history[key].length !== initialLen) historyChanged = true;
             if (history[key].length === 0) {
                 delete history[key];
                 historyChanged = true;
@@ -242,17 +208,9 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
             return;
         }
 
-        // 🔑 LOAD LAST
+        // 🔑 LOAD LAST BASELINE
         const lastRaw = await platform.env.GOLD_KV.get("last_prices");
-        const lastPricesRaw = lastRaw ? JSON.parse(lastRaw) : {};
-        const lastPrices: Record<string, { buy: number, sell: number }> = {};
-        for (const k in lastPricesRaw) {
-            if (typeof lastPricesRaw[k] === "number") {
-                lastPrices[k] = { sell: lastPricesRaw[k], buy: 0 };
-            } else {
-                lastPrices[k] = lastPricesRaw[k];
-            }
-        }
+        const lastPrices: Record<string, { buy: number, sell: number }> = lastRaw ? JSON.parse(lastRaw) : {};
 
         // 🔍 DETECT CHANGE (0 = notify on any change)
         const threshold = parseInt(platform.env.THRESHOLD || "0");
@@ -265,7 +223,7 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
 
             console.log(`🔍 [${key}] Current: ${item.sell}, Last: ${last?.sell || 'N/A'}, Delta: ${deltaSell}, Threshold: ${threshold}`);
 
-            if (deltaSell > threshold || deltaBuy > threshold || !last) {
+            if (deltaSell >= threshold || deltaBuy >= threshold || !last) {
                 changed = true;
                 console.log(`🎯 [${key}] Change detected! Triggering notification.`);
             }
@@ -279,7 +237,8 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
             const len = history[key].length;
             const lastEntry = len > 0 ? history[key][len - 1] : null;
 
-            if (!lastEntry || lastEntry.p !== item.sell) {
+            // Add point if price changed or if no point exists for the last hour
+            if (!lastEntry || lastEntry.p !== item.sell || (now - lastEntry.t >= 3600000)) {
                 history[key].push({ p: item.sell, t: now });
                 historyChanged = true;
             }
@@ -291,80 +250,46 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
         }
 
         // ⚡ UPDATE CURRENT CACHE & TRENDS
-        let currentCacheChanged = true;
         const currentRaw = await platform.env.GOLD_KV.get("current_prices");
+        const cached = currentRaw ? JSON.parse(currentRaw) : null;
+        const cachedCurrent = cached?.data?.current || [];
 
-        if (currentRaw) {
-            try {
-                const cached = JSON.parse(currentRaw);
-                let priceChanged = false;
-                const cachedCurrent = cached.data?.current || [];
-
-                if (success.length !== cachedCurrent.length) {
-                    priceChanged = true;
-                }
-
-                for (const item of success) {
-                    const old = cachedCurrent.find((o: any) => o.source === item.source && o.type === item.type);
-                    if (!old) {
-                        priceChanged = true;
-                        continue;
-                    }
-
-                    // Override API trend with our internally tracked cache difference
-                    if (old.sell !== item.sell) {
-                        item.change_sell = item.sell - old.sell;
-                        priceChanged = true;
-                    } else {
-                        item.change_sell = old.change_sell !== undefined ? old.change_sell : item.change_sell;
-                    }
-
-                    if (old.buy !== undefined && old.buy !== item.buy && old.buy !== 0) {
-                        item.change_buy = item.buy - old.buy;
-                        priceChanged = true;
-                    } else {
-                        item.change_buy = old.change_buy !== undefined ? old.change_buy : item.change_buy;
-                    }
-                }
-
-                if (!priceChanged && !historyChanged) {
-                    currentCacheChanged = false;
-                }
-            } catch (e) { }
-        }
+        success.forEach(item => {
+            const old = cachedCurrent.find((o: any) => o.source === item.source && o.type === item.type);
+            if (old) {
+                item.change_sell = item.sell - old.sell;
+                item.change_buy = item.buy - old.buy;
+            } else {
+                item.change_sell = 0;
+                item.change_buy = 0;
+            }
+        });
 
         const formattedWithDeltas = success.map(item => {
             const key = `${item.source}_${item.type}`;
             const last = lastPrices[key];
-            const res = {
+            return {
                 ...item,
-                delta_sell: (last && last.sell > 0) ? (item.sell - last.sell) : 0,
-                delta_buy: (last && last.buy > 0) ? (item.buy - last.buy) : 0
+                delta_sell: last ? (item.sell - last.sell) : 0,
+                delta_buy: last ? (item.buy - last.buy) : 0
             };
-            if (res.delta_sell === item.sell) res.delta_sell = 0;
-            if (res.delta_buy === item.buy) res.delta_buy = 0;
-            return res;
         });
 
         const currentPricesData = { current: formattedWithDeltas, history: history };
 
-        if (currentCacheChanged || isManual) {
-            await platform.env.GOLD_KV.put("current_prices", JSON.stringify({
-                data: currentPricesData,
-                timestamp: Date.now()
-            }));
-            console.log(currentCacheChanged ? "🔄 Cache updated due to changes" : "🔄 Cache updated (manual sync)");
-        } else {
-            console.log("⏸ No data changes, skipping cache writes");
-        }
+        await platform.env.GOLD_KV.put("current_prices", JSON.stringify({
+            data: currentPricesData,
+            timestamp: Date.now()
+        }));
 
-        // ⏰ DAILY HEARTBEAT (Force send at 8 AM ICT)
+        // ⏰ DAILY HEARTBEAT (Force send at 8 AM ICT, first run only)
         const dateICT = new Date(now + (7 * 3600000));
         const hourICT = dateICT.getUTCHours();
-        const isHeartbeatHour = hourICT === 8;
+        const minuteICT = dateICT.getUTCMinutes();
+        const isHeartbeatHour = (hourICT === 8 && minuteICT < 5); // Only first run of 8 AM hour
 
         if (isHeartbeatHour && !isManual) {
-            console.log("⏱ Daily heartbeat triggered (8 AM ICT). Forcing notification.");
+            console.log(`⏱ Daily heartbeat triggered (${hourICT}:${minuteICT} ICT). Forcing notification.`);
             changed = true;
         }
 
@@ -375,7 +300,10 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
 
         // 🎯 FILTER CHANGED ITEMS
         const itemsToReport = (isManual || isHeartbeatHour) ? formattedWithDeltas : formattedWithDeltas.filter(item => {
-            return item.delta_sell !== 0 || item.delta_buy !== 0;
+            const key = `${item.source}_${item.type}`;
+            const last = lastPrices[key];
+            if (!last) return true; // Report new items
+            return Math.abs(item.sell - last.sell) >= threshold || Math.abs(item.buy - last.buy) >= threshold;
         });
 
         // 📩 SEND TELEGRAM
@@ -400,20 +328,22 @@ export async function runSyncJob(platform: App.Platform, isManual: boolean) {
                     });
 
                     // 💾 SAVE NEW PRICES (Baseline for next notification)
+                    // Only update baseline for items that were actually reported
                     const updatedPrices: Record<string, { buy: number, sell: number }> = { ...lastPrices };
-                    success.forEach(item => {
+                    itemsToReport.forEach(item => {
                         const key = `${item.source}_${item.type}`;
                         updatedPrices[key] = { buy: item.buy, sell: item.sell };
                     });
                     await platform.env.GOLD_KV.put("last_prices", JSON.stringify(updatedPrices));
-                    console.log("💾 Baseline updated in KV.");
+                    console.log(`💾 Baseline updated in KV for ${itemsToReport.length} items.`);
                 } else {
                     const errorText = await tgRes.text();
                     console.error(`❌ Telegram API Error: ${tgRes.status} - ${errorText}`);
                 }
             } else {
-                console.error("❌ CRITICAL: TELEGRAM_TOKEN or CHAT_ID is missing in platform.env!");
+                console.error("❌ CRITICAL: TOKEN or CHAT_ID is missing in platform.env!");
                 console.log("Current Env Keys:", Object.keys(platform.env));
+                console.log("Expected Keys: TOKEN, CHAT_ID");
             }
         }
 
@@ -439,16 +369,16 @@ function buildMessage(list: GoldItem[]) {
         return `${sourceName}\n${items.map(item => {
             const trendSell = item.delta_sell > 0 ? "📈" : item.delta_sell < 0 ? "📉" : "➖";
             const deltaSellText = item.delta_sell !== 0 ? ` (<i>${item.delta_sell > 0 ? '↑' : '↓'}${Math.abs(item.delta_sell).toLocaleString("vi-VN")}</i>)` : "";
-            const todaySellText = item.change_sell !== 0 ? ` [Today: ${item.change_sell > 0 ? '+' : ''}${item.change_sell.toLocaleString("vi-VN")}]` : "";
+            const todaySellText = item.change_sell !== 0 ? ` [24h: ${item.change_sell > 0 ? '+' : ''}${item.change_sell.toLocaleString("vi-VN")}]` : "";
 
             const trendBuy = item.delta_buy > 0 ? "📈" : item.delta_buy < 0 ? "📉" : "➖";
             const deltaBuyText = item.delta_buy !== 0 ? ` (<i>${item.delta_buy > 0 ? '↑' : '↓'}${Math.abs(item.delta_buy).toLocaleString("vi-VN")}</i>)` : "";
-            const todayBuyText = item.change_buy !== 0 ? ` [Today: ${item.change_buy > 0 ? '+' : ''}${item.change_buy.toLocaleString("vi-VN")}]` : "";
+            const todayBuyText = item.change_buy !== 0 ? ` [24h: ${item.change_buy > 0 ? '+' : ''}${item.change_buy.toLocaleString("vi-VN")}]` : "";
 
             return `
 💰 <b>${item.name}</b>
-├ 🟢 Buy:  <code>${item.buy.toLocaleString('vi-VN')}</code>${deltaBuyText}${todayBuyText} ${trendBuy}
-├ 🔴 Sell: <code>${item.sell.toLocaleString('vi-VN')}</code>${deltaSellText}${todaySellText} ${trendSell}
+├ 🟢 <b>Buy:</b>  <code>${item.buy.toLocaleString('vi-VN')}</code>${deltaBuyText}${todayBuyText} ${trendBuy}
+├ 🔴 <b>Sell:</b> <code>${item.sell.toLocaleString('vi-VN')}</code>${deltaSellText}${todaySellText} ${trendSell}
 └ 🕒 <i>Refreshed: ${item.time} | ${item.date}</i>`;
         }).join("\n")}`;
     }).join("\n\n──────────────\n\n");
@@ -514,6 +444,6 @@ function generateChartUrl(current: GoldItem[], history: Record<string, { p: numb
         return { label: cfg.label, data: sampledPrices, borderColor: cfg.color, fill: false, borderWidth: 2, pointRadius: sampledPrices.length > 50 ? 0 : 3 };
     });
 
-    const chartConfig = { type: "line", data: { labels, datasets }, options: { title: { display: true, text: "Gold Price Trend (Hourly)" }, legend: { position: "bottom" }, scales: { xAxes: [{ ticks: { maxTicksLimit: 12, autoSkip: true } }], yAxes: [{ ticks: { callback: (val: number) => (val / 1000000).toFixed(1) + "M" } }] } } };
+    const chartConfig = { type: "line", data: { labels, datasets }, options: { title: { display: true, text: "Gold Price Trend (Hourly)" }, legend: { position: "bottom" }, scales: { xAxes: [{ ticks: { maxTicksLimit: 12, autoSkip: true } }], yAxes: [{ ticks: {} }] } } };
     return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&width=800&height=500&backgroundColor=white`;
 }
